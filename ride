@@ -7,6 +7,8 @@ from dlib import get_frontal_face_detector, shape_predictor
 from video_treatment import search_video_size
 
 from paths import dlib_model
+from paths import dlib_model1
+
 from paths import video_path
 
 from dlib_points.points_of_face import load_model_dlib
@@ -15,10 +17,17 @@ from dlib_points.points_of_face import head_points
 
 from scipy.spatial import distance as dist
 
+
+from tete.bent_up_head import bent_up_head
+from tete.leanning_head import leanning_head
+from tete.turn_head import turn_head
+
+
 predictor = ""
 detector = ""
 
-
+predictor1 = ""
+detector1 = ""
 
 
 
@@ -27,8 +36,20 @@ def a(dlib_model):
     global detector
     predictor, detector = load_model_dlib(dlib_model)
 
+
+def b(dlib_model1):
+    global predictor1
+    global detector1
+    predictor1, detector1 = load_model_dlib(dlib_model1)
+
 t1 = threading.Thread(target=a(dlib_model))
+t2 = threading.Thread(target=b(dlib_model1))
+
 t1.start()
+t2.start()
+
+t1.join()
+t2.join()
 
 
 
@@ -36,36 +57,15 @@ t1.start()
 
 from video_capture_utils.video_capture_utils import resize_face, resize_eyes
 
-video = video_path.format("e.mp4")
+video = video_path.format("aa.mp4")
 cap = cv2.VideoCapture(video)
 
 
-face_division = search_video_size(video, predictor, detector, dlib_model, 93)
-#face_division = 2.899999999999998
-
-##dd
-#face_division = 2.899999999999998
+#face_division = search_video_size(video, predictor, detector, dlib_model, 93)
+face_division = 2.899999999999998
 
 
 
-
-cerne1 = []
-cerne2 = []
-
-nez_cote1 = []
-nez_cote2 = []
-
-bouche_cote1 = []
-bouche_cote2 = []
-
-front = []
-
-entre_oeil = []
-
-bouche_haut = []
-
-patte_doies1 = []
-patte_doies2 = []
 
 
 def make_line(thresh):
@@ -79,6 +79,7 @@ def make_line(thresh):
 
     return thresh
 
+
 def skin_detector(frame):
 
 
@@ -87,7 +88,7 @@ def skin_detector(frame):
     imageYCrCb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCR_CB)
     skinRegionYCrCb = cv2.inRange(imageYCrCb,min_YCrCb,max_YCrCb)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
     skinMask = cv2.dilate(skinRegionYCrCb, kernel, iterations = 2)
     skinMask = cv2.morphologyEx(skinMask, cv2.MORPH_CLOSE, kernel)
 
@@ -95,377 +96,381 @@ def skin_detector(frame):
 
     return skinYCrCb
 
-last = 0
-def front(frame_head, liste, th2, landmarks_head):
 
-    area_landmarks1 = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [17, 26]]
-    area_landmarks2 = [(i[0], i[1] - int((5 * 100) / i[1])) for i in area_landmarks1]
-    area_landmarks = area_landmarks1 + area_landmarks2
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-    y2 = (y+h) - int((0.2 * 100) / y+h)
-    y = y - int((25 * 100) / y)
-    
 
-    crop = th2[y:y2, x:x+w]
-    crop_color = frame_head[y:y2, x:x+w]
+def extremums(c):
 
-    crop_color = skin_detector(crop_color)
+    xe = tuple(c[c[:, :, 0].argmin()][0])  #left
+    ye = tuple(c[c[:, :, 1].argmin()][0])  #right
+    we = tuple(c[c[:, :, 0].argmax()][0])
+    he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
 
-    h, w = crop_color.shape[:2]
+    return xe, ye, we, he
 
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    superposition = 0
-    for c in contours:
 
-        if 1 < (cv2.contourArea(c) * 100) / (h*w) < 20:
+def recuperate_coordinate(crop_color_skin, extremums):
+    """Recuperate from extremums contours the color
+    from the picture"""
 
-            #print(cv2.contourArea(c), h*w, (cv2.contourArea(c) * 100) / (h*w))
+    xe, ye, we, he = extremums
 
+    right = crop_color_skin[xe[1], xe[0]] #right coord
+    left  = crop_color_skin[ye[1], ye[0]] #left coord
 
+    left_bot = crop_color_skin[ye[1], xe[0]] #left bot coord
+    left_top = crop_color_skin[he[1], xe[0]] #left top coord
 
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
+    right_bot = crop_color_skin[ye[1], we[0]] #right bot coord
+    right_top = crop_color_skin[he[1], we[0]] #right top coord
 
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
+    top_right = crop_color_skin[ye[1], xe[0]] #right bot coord
+    top_left  = crop_color_skin[ye[1], we[0]] #right top coord
 
+    bot_right = crop_color_skin[he[1], xe[0]] #right bot coord
+    bot_left  = crop_color_skin[he[1], we[0]] #right top coord
 
-            #conditions:
+    return (right, left, left_bot, left_top, right_bot, right_top,
+            top_right, top_left, bot_right, bot_left)
 
-                #hauteur et largeur a définir du contour.
-                #droite ou diagonal de penchaison de moins de a définir. (m = y2-y1/x2-x1)
-                #2 a 5 lignes superposé,
 
+def no_skin_color(c, crop_color_skin):
 
-            aa = crop_color[xe[1], xe[0]]
-            bb = crop_color[ye[1], ye[0]]
-            cc = crop_color[we[1], we[0]]
-            dd = crop_color[he[1], he[0]]
+    xe, ye, we, he = extremums(c)
 
-            
+    #Recuperate extremums contours colors from the skin picture.
+    coordinates = recuperate_coordinate(crop_color_skin, (xe, ye, we, he))
+    right, left, left_bot, left_top, right_bot, right_top,\
+            top_right, top_left, bot_right, bot_left = coordinates
 
-            black = False
-            for i in [aa, bb, cc, dd]:
-                if i[0] == 0 and i[1] == 0 and i[2] == 0:
-                    black = True
+    black = False
+    #If extremums left and right touch black pixel (255, 255, 255)
+    #isn't skin pixels.
+    #Verify if sides touch black pixels. (no skin pixels)
+    verification = lambda i: True if i[0] == 0 and i[1] == 0 and i[2] == 0 else False
 
-            largeur = abs(we[0] - xe[0])
-            hauteur = abs(he[1] - ye[1])
-            #print(largeur, w, hauteur, h)
+    #right left extremums.
+    contour_touch_black1 = [verification(i) for i in [right, left]]
+    contour_touch_black2 = [verification(i) for i in [left_bot, left_top]]
+    contour_touch_black3 = [verification(i) for i in [right_bot, right_top]]
+    contour_touch_black4 = [verification(i) for i in [top_right, top_left]]
+    contour_touch_black5 = [verification(i) for i in [bot_right, bot_left]]
 
+    #Break and return True if the 2 px touchs black pixel.
+    for i in [contour_touch_black1, contour_touch_black2, contour_touch_black3,
+              contour_touch_black4, contour_touch_black5]:
+        if i.count(True) == 2:
+            black = True
+            break
 
-            dimension = False
-            if largeur >= int(w * 0.15) and hauteur <= int(h * 0.34) and\
-               largeur < int(w * 0.6):
-                dimension = True
+    return black, (xe, ye, we, he)
 
 
 
-            if black is False and dimension is True:
+def recuperate_forehead_area(landmarks_head1, head_box_head1):
+    """We recuperate landmarks from 81 points dlib (forehead region)"""
 
-                superposition += 1
-            
-                cv2.drawContours(crop_color, [c], -1, (0, 255, 0), 1)
+    #17 - 26 = on eyes
+    #69 - 80 = forehead https://github.com/codeniko/shape_predictor_81_face_landmarks
+    landmarks_forehead = [75, 76, 68, 69, 70, 71, 80, 72, 73, 79, 74]
+    landmarks_on_eyes  = [26, 25, 24, 23, 22, 21, 20, 19, 18, 17]
 
-                [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 0, 255), 1) for i in [we]]
-                [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 0), 1) for i in [xe]]
-                [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 255, 255), 1) for i in [ye]]
-                [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 255), 1) for i in [he]]
+    #Recuperate coordinates
+    landmarks_forehead = [(landmarks_head1.part(n).x, landmarks_head1.part(n).y) for n in landmarks_forehead]
 
-                h, w = crop_color.shape[:2]
-                crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
+    _, _, _, h = head_box_head1
+    landmarks_on_eyes  = [(landmarks_head1.part(n).x, landmarks_head1.part(n).y - int( (5 * h) / 100))
+                          for n in landmarks_on_eyes]
 
-                #cv2.imshow("crop_color_resize", crop_color_resize)
-                #cv2.imshow("dza", frame_head)
-                #cv2.waitKey(0)
+    landmarks_on_eyes += landmarks_forehead
 
-    #print("nombre de ride front :", superposition)
-    #cv2.rectangle(frame_head, (x, y), (x+w, y2), (0, 0, 255), 1)
 
+    #Recuperate points into a matrice
+    landmarks_on_eyes = np.array(landmarks_on_eyes)
 
+    return landmarks_on_eyes
 
-def bouche_cote_1(frame_head, landmarks_head, th2):
 
+def recuperate_forehead_mask(points, gray, height_frame, width_frame,
+                             threshold, frame_skin, frame, blur_frame):
+    """Here we recuperate the region from the picture"""
 
-    area_landmarks1 = (landmarks_head.part(31).x - int((15 * 100) / landmarks_head.part(31).x),
-                        landmarks_head.part(31).y - int((0.5 * 100) / landmarks_head.part(31).y))
+    black_frame = np.zeros((height_frame, width_frame), np.uint8)
+    mask = np.full((height_frame, width_frame), 255, np.uint8)
+    cv2.fillPoly(mask, [points], (0, 0, 255))
 
-    area_landmarks2 = (landmarks_head.part(48).x  - int((15 * 100) / landmarks_head.part(48).x),
-                        landmarks_head.part(48).y + int((0.5 * 100) / landmarks_head.part(48).x))
+    #Skin mask (raise hair)
+    gray_skin = cv2.cvtColor(frame_skin, cv2.COLOR_BGR2GRAY)
+    mask_skin = cv2.bitwise_not(black_frame, gray_skin.copy(), mask=mask)
 
-    area_landmarks3 = (area_landmarks1[0]- int((45 * 100) / area_landmarks1[0]),
-                       area_landmarks1[1]- int((15 * 100) / area_landmarks1[1]))
+    #Threshold mask for wrinkles
+    mask_threhsold = cv2.bitwise_not(black_frame, threshold.copy(), mask=mask) 
 
-    area_landmarks4 = (area_landmarks2[0] - int((45 * 100) / area_landmarks2[0]),
-                       area_landmarks2[1] + int((15 * 100) / area_landmarks2[1]))
+    #Recuperate region interest.
+    box = cv2.boundingRect(points)
+    x ,y, w, h = box
 
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
+    crop_skin      = frame_skin[y:y+h, x:x+w]
 
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
+    crop_threhsold = mask_threhsold[y:y+h, x:x+w]
+    crop_threhsold = make_line(crop_threhsold)
 
+    crop_frame     = frame[y:y+h, x:x+w]
+    crop_blur      = blur_frame[y:y+h, x:x+w]
 
-    crop = th2[y:y+h, x:x+w]
-    crop_color = frame_head[y:y+h, x:x+w]
-    crop_color = skin_detector(crop_color)
+    #Put white pixel into none skin pixel (hair) on threshold
+    for j in range(crop_skin.shape[1]):
+        for i in range(crop_skin.shape[0]):
+            if crop_skin[i, j][0] == 0 and\
+               crop_skin[i, j][1] == 0 and\
+               crop_skin[i, j][2] == 0:
+                crop_threhsold[i, j] = 255
 
-    crop = make_line(crop)
-    #cv2.imshow("crop", crop)
+    return (crop_skin, crop_threhsold, crop_frame, crop_blur)
 
-    h, w = crop_color.shape[:2]
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    for c in contours:
 
-        if 10 < (cv2.contourArea(c) * 100) / (h * w) < 90:
+def hair_color(crop_blur, contour): #a verifier
+    """Recuperate color of a contour different of a skin color, who could be hair"""
 
+    #Hair color.
+    noir = 0; marron = 0; blond = 0; no = 0; out = ""
 
+    #Dimension of the crop.
+    height, width = crop_blur.shape[:2]
 
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
+    #Recuperate color of the contour.
+    couleur_hair = [crop_blur[j, i] for j in range(height) for i in range(width)]
 
+    #Condition of color pixels.
+    for nb, couleur in enumerate(couleur_hair):
 
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 0, 255), 1) for i in [we]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 0), 1) for i in [xe]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 255, 255), 1) for i in [ye]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 255), 1) for i in [he]]
+        if couleur[1] + 10 < couleur[0] > couleur[2] + 10 and 50 < couleur[1] < 130:
+            marron += 1
 
-            aa = crop_color[xe[1], xe[0]]
-            bb = crop_color[ye[1], ye[0]]
-            cc = crop_color[we[1], we[0]]
-            dd = crop_color[he[1], he[0]]
+        elif couleur[0] < 50 and couleur[1] < 50 and couleur[2] < 50:
+            noir += 1
 
-            black = False
-            for i in [aa, bb, cc, dd]:
-                if i[0] == 0 or i[1] == 0 or i[2] == 0:
-                    black = True
+        elif couleur[0] > 90 and couleur[1] > 90 and couleur[2] > 90 and\
+           couleur[0] >= couleur[1] + 10 and couleur[1] >= couleur[2] + 10:
+            blond += 1
 
+    #Sort our dictionnary and recuperate the highter number.
+    dico_color = {"noir":noir, "marron":marron, "blond":blond, "no":no}
+    dico_color = sorted(dico_color.items(), key=lambda t: t[1])
 
-            if black is False:
+    #If we have more 50 % of black.
+    if (dico_color[-1][1] * nb) / 100 > 50:
+        out = dico_color[-1][0]
 
-                largeur = abs(we[0] - xe[0])
-                hauteur = abs(he[1] - ye[1])
+    return out
 
-                #print(largeur, hauteur)
 
-                
-                m = (he[1] - ye[1]) / (he[0] - ye[0])
-                #print(m, largeur, hauteur)
 
-                #ICIIIII YA LA HAUTEUR SELON LA HAUTEUR DU CROP
-                if m < 0 and abs(m) <= 9 and abs(m) >= 3.6 and 50 >= hauteur >= 16:
-                    #print("ride bouche")
-                    cv2.drawContours(crop_color, [c], -1, (0, 255, 0), 1)
-                    cv2.line(crop_color, ye, he, (0, 0, 255), 1)
+def frange_side(extrems, head_box_head1):
+    """frange side = hair parting side"""
 
-                crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-                #cv2.imshow("crop_color_resize", crop_color_resize)
-                #cv2.waitKey(0)
+    #width of the head box
+    _, _, width_head, _ = head_box_head1
+    #Extremums of the contours.
+    xe, ye, we, he = extrems
 
-    #cv2.rectangle(frame_head, (x, y), (x+w, y+h), (0, 0, 255), 1)
+    #Middle of the face.
+    mid_face = int(width_head / 2)
+    #We want a wick hair (with a length).
+    length_contour = int(we[0] - xe[0]) > width_head * 0.4 #30 de 77
 
+    situation_meche = ""
+    #Search the higther side (left or right).
+    if ye[0] > mid_face:  situation_meche = "meche droite donc raie gauche"
+    else:                 situation_meche = "meche gauche donc raie droite"
 
+    return situation_meche
 
 
-def bouche_cote_2(frame_head, landmarks_head, th2):
 
+LOCALISATION_WRINKLE = [] #(Coordinate, pente angulaire, dimensions, scale)
 
-    area_landmarks1 = (landmarks_head.part(35).x + int((5 * 100) / landmarks_head.part(35).x),
-                        landmarks_head.part(35).y - int((5 * 100) / landmarks_head.part(35).y))
+def wrinkle_draw(cnt, mask_frame, area_forehead):
 
-    area_landmarks2 = (landmarks_head.part(54).x + int((5 * 100) / landmarks_head.part(54).x),
-                        landmarks_head.part(54).y+ int((5 * 100) / landmarks_head.part(54).x))
+    #(Coordinate, pente angulaire, dimensions, scale)
+    global LOCALISATION_WRINKLE
 
-    area_landmarks3 = (area_landmarks1[0] + int((45 * 100) / area_landmarks1[0]),
-                       area_landmarks1[1]- int((5 * 100) / area_landmarks1[1]))
+    #print(height * width, cv2.contourArea(cnt))
 
-    area_landmarks4 = (area_landmarks2[0] + int((45 * 100) / area_landmarks2[0]),
-                       area_landmarks2[1] + int((5 * 100) / area_landmarks2[1]))
+    #Recuperate extremums points of the contour.
+    xe, ye, we, he = extremums(cnt)
 
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
+    #Recuperate dimensions of the contour.
+    largeur  = we[0] - xe[0]
+    longueur = he[1] - ye[1]
 
+    #Recuperate the dominant form of the wrinkle
+    if largeur > longueur:
+        m = (we[1] - xe[1]) / (we[0] - xe[0])
+        cv2.line(mask_frame, we, xe, (0, 0, 255), 1)
+        largeur = True
 
+    elif longueur > largeur:
+        m = (he[1] - ye[1]) / (he[0] - ye[0])
+        cv2.line(mask_frame, he, ye, (0, 0, 255), 1)
+        longueur = True
 
-    crop = th2[y:y+h, x:x+w]
-    crop_color = frame_head[y:y+h, x:x+w]
-    crop_color = skin_detector(crop_color)
+    #Verify if the wrinkle location's stocked
+    new_wrinkle = localisation(area_forehead)
 
-    crop = make_line(crop)
-    #cv2.imshow("crop", crop)
+    #Wrinkle is not int stock.
+    if new_wrinkle is True:
 
-    h, w = crop_color.shape[:2]
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    for c in contours:
+        if largeur is True:
+            #(Coordinate, pente angulaire, dimensions, scale)
+            LOCALISATION_WRINKLE.append((we, xe, m, we[0] - xe[0], area_forehead))
 
-        if 10 < (cv2.contourArea(c) * 100) / (h * w) < 90:
+        elif longueur is True:
+            #(Coordinate, pente angulaire, dimensions, scale)
+            LOCALISATION_WRINKLE.append((he, ye, m, he[1] - ye[1], area_forehead))
 
 
+def localisation(area_forehead, dimension):
 
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
+    #(Coordinate, pente angulaire, dimensions, scale)
+    global LOCALISATION_WRINKLE
 
+    new_wrinkle = False
+    for i in LOCALISATION_WRINKLE:
+        print(i)
 
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 0, 255), 1) for i in [we]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 0), 1) for i in [xe]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (0, 255, 255), 1) for i in [ye]]
-            [cv2.circle(crop_color, (i[0], i[1]), 1, (255, 0, 255), 1) for i in [he]]
+    new_wrinkle = True
+    return new_wrinkle
 
-            aa = crop_color[xe[1], xe[0]]
-            bb = crop_color[ye[1], ye[0]]
-            cc = crop_color[we[1], we[0]]
-            dd = crop_color[he[1], he[0]]
 
-            black = False
-            for i in [aa, bb, cc, dd]:
-                if i[0] == 0 or i[1] == 0 or i[2] == 0:
-                    black = True
 
 
-            if black is False:
 
-                largeur = abs(we[0] - xe[0])
-                hauteur = abs(he[1] - ye[1])
 
-                m = (he[1] - ye[1]) / (he[0] - ye[0])
 
-                #print(m, largeur, w, hauteur, h)
 
-                if m >= 0.8 and m <= 3.5 and 50 >= hauteur >= 16:
-                    #print("ride bouche")
-                    cv2.drawContours(crop_color, [c], -1, (0, 255, 0), 1)
-                    cv2.line(crop_color, ye, he, (0, 0, 255), 1)
+def identification_wrinkles(frame, mask_skin, mask_threhsold,
+                            mask_frame, mask_blur, head_box_head1,
+                            landrmarks_forehead):
+    """Recuperate contours of the thresold crop, and treat them for know
+    if we have wick or wrinkles of the forehead"""
 
-                crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-                #cv2.imshow("crop_color_resize", crop_color_resize)
-                #cv2.waitKey(0)
+    #Count area region of the forehead
+    area_forehead = cv2.contourArea(landrmarks_forehead)
+    space_forehead = 0
 
+    height, width = mask_threhsold.shape[:2]
+    contours, _ = cv2.findContours(mask_threhsold, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
 
-    #cv2.rectangle(frame_head, (x, y), (x+w, y+h), (0, 0, 255), 1)
+    for cnt in contours:
 
+        #Conditions for keep the contour. (max and min length).
+        max_contour = cv2.contourArea(cnt) < (height * width) * 0.9 #5220 de 5800
+        min_contour = cv2.contourArea(cnt) > int( (height * width) * 0.0039 ) #16 de 4140
 
 
-def entre_oeil(landmarks_head, frame_head, gray):
+        if max_contour is True and min_contour is True:
 
-    area_landmarks1 = (landmarks_head.part(21).x,
-                       landmarks_head.part(21).y + int((2 * 100) / landmarks_head.part(21).y))
+            #Not a skin color
+            black, extrems = no_skin_color(cnt, mask_skin)
+            if black is True:
+                color = hair_color(mask_blur, cnt)
 
-    area_landmarks2 = (landmarks_head.part(22).x,
-                       landmarks_head.part(22).y + int((2 * 100) / landmarks_head.part(21).y))
+                #Could be hair, verify colors
+                if color is not None:
+                    situation_meche = frange_side(extrems, head_box_head1)
+                    if situation_meche is not "":
+                        cv2.drawContours(mask_frame, [cnt], -1, (255, 0, 0), 1)
+                        cv2.imshow("frame_head", frame_head)
+                        cv2.waitKey(0)
 
-    area_landmarks3 = (area_landmarks1[0],
-                        area_landmarks1[1] - int((2 * 100) / area_landmarks1[1]))
-                    
 
-    area_landmarks4 = (area_landmarks2[0],
-                        area_landmarks2[1] - int((2 * 100) / area_landmarks2[1]))
+            #Skin color
+            elif black is False:
 
+                space_forehead += cv2.contourArea(cnt)
 
+                wrinkle_draw(cnt, mask_frame, area_forehead)
 
 
+                #cv2.drawContours(mask_frame, [cnt], -1, (0, 255, 0), 1)
+                cv2.imshow("frame_head", frame_head)
+                cv2.waitKey(0)
 
 
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
+    #cv2.imshow("mask_threhsold", mask_threhsold)
+    #cv2.imshow("mask_skin", mask_skin)
 
-    x, y, w, h = box
 
-    x2 = x + w + 5
-    x = x - 5
-    y2 = (y + h)
-    y = y - 10
 
-    #cv2.rectangle(frame_head, (x, y), (x2, y2), (0, 0, 255), 1)
 
-    th2 = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_MEAN_C,\
-                                cv2.THRESH_BINARY,31,6)
 
-    #on a notre forme mais mtn il faut identifier la forme.
 
-    crop = th2[y:y2, x:x2]
-    crop = make_line(crop)
+def front(frame_head, landmarks_head, landmarks_head1, gray,
+          threshold, frame_skin, frame_blur, head_box_head1):
 
-    crop_color = frame_head[y:y2, x:x2]
+    #Recuperate forehead region from dlib model.
+    landrmarks_forehead = recuperate_forehead_area(landmarks_head1, head_box_head1)
+    #cv2.drawContours(frame_head, [landrmarks_forehead], -1, (0, 0, 255), 1)
 
-    h, w = crop_color.shape[:2]
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    #Recuperate dimensions of the picture.
+    height_frame, width_frame = frame_head.shape[:2]
 
-    barre = 0
-    barre_ligne = []
-    
-    for c in contours:
+    #Recuperate mask interest of the picture.
+    masks = recuperate_forehead_mask(landrmarks_forehead, gray, height_frame,
+                                     width_frame, threshold, frame_skin, frame_head, frame_blur)
 
+    mask_skin, mask_threhsold, crop_frame, crop_blur = masks
+    #cv2.imshow("mask_threhsold", mask_threhsold)
+    #cv2.imshow("mask_skin", mask_skin)
 
 
-        if 50 > (cv2.contourArea(c) * 100) / (h * w) > 5:
+    identification_wrinkles(frame_head, mask_skin, mask_threhsold,
+                            crop_frame, crop_blur, head_box_head1,
+                            landrmarks_forehead)
 
-            #print((cv2.contourArea(c) * 100) / (h * w))
-            #cv2.drawContours(crop_color, [c], -1, (0, 255, 0), 1)
 
 
 
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
 
 
-            largeur = abs(we[0] - xe[0])
-            hauteur = abs(he[1] - ye[1])
 
 
+#------- Raise anatomy --------
 
+def raising_part(landmarks_head, points_list, picture, head_box_head):
+    """Put white on region interest on a gray picture"""
 
-            #qprint(largeur, w)#0.46
-            #print(hauteur, h)
+    #Add height px of our y points.
+    height = head_box_head[3]
+    add_height_to_points = int(height * 0.055) # 5 91
 
-            #print("")
+    #Recuperate landmarks 1:-1
+    region = [(landmarks_head.part(n).x, landmarks_head.part(n).y - add_height_to_points)
+              for n in points_list[1: -1]]
 
+    #First and last landmark (for hide on eyes)
+    region1 = [(landmarks_head.part(points_list[0]).x, landmarks_head.part(points_list[0]).y)]
+    region2 = [(landmarks_head.part(points_list[-1]).x, landmarks_head.part(points_list[-1]).y)]
 
-            m = (he[1] - ye[1]) / (we[0] - xe[0])
-            #print(m)
+    #Make one list
+    region1 += region
+    region1 += region2
 
-            if 0.7 <= m <= 4:
+    #Transfor points into array
+    region = np.array(region1)
+    #Fill the region in white color on a gray picture
+    cv2.fillPoly(picture, [region], (255, 255, 255))
 
 
 
 
-                barre += 1
-                aa = int((xe[0] + we[0]) / 2), ye[1]
-                bb = int((xe[0] + we[0]) / 2), he[1]
-                barre_ligne.append((aa, bb))
 
 
 
-    if barre >= 2:
-        for i in barre_ligne:
-            for j in barre_ligne:
 
-                if dist.euclidean(i[1], j[1]) != 0 and\
-                   int(dist.euclidean(i[1], j[1])) < int(w* 0.54):
-                    pass
-                    #print("ride du lion")
-                    #cv2.line(crop_color, i[0], i[1], (0, 0, 255), 1)
-                    #cv2.line(crop_color, j[0], j[1], (0, 0, 255), 1)
-        
 
-## ATTENTION LES RIDE DU LION A + DE X APPARITIONS DISENT ... (apparaissent une fois des fois
-                    #de temps en temps
-#ne pas effacer directement la liste car ca peut ne pas se detecter quelques fois
 
-                    
-##    crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-##    crop_resize = cv2.resize(crop, (w * 4, h * 4))
-##
-##    cv2.imshow("crop_resize", crop_resize)
-##    cv2.imshow("crop_color_resize", crop_color_resize)
-##    cv2.waitKey(0)
 
 
 
@@ -474,338 +479,19 @@ def entre_oeil(landmarks_head, frame_head, gray):
 
 
 
+#------- Thread --------
 
+def un(frame_head, landmarks_head, landmarks_head1, gray,
+       threshold, frame_skin, frame_blur, head_box_head1):
 
+    front(frame_head, landmarks_head, landmarks_head1,
+          gray, threshold, frame_skin, frame_blur, head_box_head1)
 
 
-def cote_oeil_1(landmarks_head, frame_head, th2):
 
-    #IF TOURNE LA TETE A DROITE NE PAS FAIREEEEEEE
 
-    area_landmarks1 = (landmarks_head.part(37).x - int((20 * 100) / landmarks_head.part(37).x),
-                        landmarks_head.part(37).y -
-                       int((5 * 100) / landmarks_head.part(37).y))
 
-    area_landmarks2 = (landmarks_head.part(41).x - int((20 * 100) / landmarks_head.part(41).x),
-                        landmarks_head.part(41).y - int((5 * 100) / landmarks_head.part(41).x))
-
-    area_landmarks3 = (area_landmarks1[0] - int((35 * 100) / area_landmarks1[0]),
-                       area_landmarks1[1]+ int((20 * 100) / area_landmarks1[1]))
-
-    area_landmarks4 = (area_landmarks2[0] - int((35 * 100) / area_landmarks2[0]),
-                       area_landmarks2[1] + int((20 * 100) / area_landmarks2[1]))
-
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-
-    x2 = (x+w)
-    y2 = y + h
-    x = x
-    y = y
-
-    #si le mec tourne la tete a droite = non,
-    #cv2.rectangle(frame_head, (x, y), (x2, y2), (0, 0, 255), 1)
-    gray = cv2.cvtColor(frame_head, cv2.COLOR_BGR2GRAY)
-
-    th2 = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
-                cv2.THRESH_BINARY,3,5)
-
-    crop = th2[y:y2, x:x2]
-    crop = make_line(crop)
-
-    crop_color = frame_head[y:y2, x:x2]
-    copy = skin_detector(crop_color)
-
-    contour_liste = []
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    patte = 0
-    for c in contours:
-        if (cv2.contourArea(c) * 100) / (h * w) < 25:
-
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
-
-            aa = copy[xe[1], xe[0]]
-            bb = copy[ye[1], ye[0]]
-            cc = copy[we[1], we[0]]
-            dd = copy[he[1], he[0]]
-
-            largeur = abs(we[0] - xe[0])
-            hauteur = abs(he[1] - ye[1])
-
-            
-
-
-            black = False
-            for i in [aa, bb, cc, dd]:
-                if i[0] == 0 or i[1] == 0 or i[2] == 0:
-                    black = True
-
-            if black is False:
-                contour_liste.append(c)
-                patte += 1
-
-    if patte >= 8:
-        [cv2.drawContours(crop_color, [i], -1, (0, 255, 0), 1) for i in contour_liste]
-        #print("patte doiiiie gauche")
-
-    h, w = crop.shape[:2]
-    crop_resize = cv2.resize(crop, (w * 4, h * 4))
-    crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-
-
-    cv2.imshow("crop_color_resize", crop_color_resize)
-    cv2.imshow("crop_resize", crop_resize)
-    cv2.waitKey(0)
-
-
-    #cv2.rectangle(frame_head, (x, y), (x2, y2), (0, 0, 255), 1)
-
-
-    
-
-
-
-
-def cote_oeil_2(landmarks_head, frame_head):
-    area_landmarks1 = (landmarks_head.part(44).x + int((20 * 100) / landmarks_head.part(44).x),
-                        landmarks_head.part(44).y - int((5 * 100) / landmarks_head.part(44).y))
-
-    area_landmarks2 = (landmarks_head.part(46).x + int((20 * 100) / landmarks_head.part(46).x),
-                        landmarks_head.part(46).y- int((5 * 100) / landmarks_head.part(46).x))
-
-    area_landmarks3 = (area_landmarks1[0] + int((35 * 100) / area_landmarks1[0]),
-                       area_landmarks1[1] + int((20 * 100) / area_landmarks1[1]))
-
-    area_landmarks4 = (area_landmarks2[0] + int((35 * 100) / area_landmarks2[0]),
-                       area_landmarks2[1] + int((20 * 100) / area_landmarks2[1]))
-
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-
-
-    x2 = (x+w) 
-    y2 = y + h
-    x = x
-    y = y
-
-    #si le mec tourne la tete a droite = non,
-    #cv2.rectangle(frame_head, (x, y), (x2, y2), (0, 0, 255), 1)
-    gray = cv2.cvtColor(frame_head, cv2.COLOR_BGR2GRAY)
-
-    th2 = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
-                cv2.THRESH_BINARY,3,5)
-
-    crop = th2[y:y2, x:x2]
-    crop = make_line(crop)
-
-    crop_color = frame_head[y:y2, x:x2]
-    copy = skin_detector(crop_color)
-    contour_liste = []
-    contours, _ = cv2.findContours(crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-    patte = 0
-    for c in contours:
-        if (cv2.contourArea(c) * 100) / (h * w) < 25:
-
-            xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-            ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-            we = tuple(c[c[:, :, 0].argmax()][0])  #top
-            he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
-
-            aa = copy[xe[1], xe[0]]
-            bb = copy[ye[1], ye[0]]
-            cc = copy[we[1], we[0]]
-            dd = copy[he[1], he[0]]
-
-
-            black = False
-            for i in [aa, bb, cc, dd]:
-                if i[0] == 0 or i[1] == 0 or i[2] == 0:
-                    black = True
-
-            if black is False:
-                #print((cv2.contourArea(c) * 100) / (h * w))
-                contour_liste.append(c)
-                patte += 1
-
-    if patte >= 8:
-        [cv2.drawContours(crop_color, [i], -1, (0, 255, 0), 1) for i in contour_liste]
-        #print("patte doiiiie droit")
-
-    h, w = crop.shape[:2]
-    crop_resize = cv2.resize(crop, (w * 4, h * 4))
-    crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-
-
-##    cv2.imshow("crop_color_resize", crop_color_resize)
-##    cv2.imshow("crop_resize", crop_resize)
-##    cv2.waitKey(0)
-
-
-    #cv2.rectangle(frame_head, (x, y), (x2, y2), (0, 0, 255), 1)
-
-
-
-
-
-
-def sous_yeux():
-    pass
-
-
-
-def oeil_dessous_1(landmarks_head, frame_head):
-    #CERNEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
-    #dst2 = cv2.Laplacian(gray, cv2.CV_8U, gray, ksize = 5)
-    #aaaaaaaaaaaa = cv2.bilateralFilter(dst2, 6, 75, 75)
-
-
-
-
-
-##
-##    area_landmarks1 = (landmarks_head.part(37).x - int((15 * 100) / landmarks_head.part(37).x),
-##                        landmarks_head.part(37).y -
-##                       int((0.5 * 100) / landmarks_head.part(37).y))
-##
-##    area_landmarks2 = (landmarks_head.part(41).x - int((15 * 100) / landmarks_head.part(41).x),
-##                        landmarks_head.part(41).y+ int((0.5 * 100) / landmarks_head.part(41).x))
-##
-##    area_landmarks3 = (area_landmarks1[0] - int((45 * 100) / area_landmarks1[0]),
-##                       area_landmarks1[1]- int((5 * 100) / area_landmarks1[1]))
-##
-##    area_landmarks4 = (area_landmarks2[0] - int((45 * 100) / area_landmarks2[0]),
-##                       area_landmarks2[1] + int((5 * 100) / area_landmarks2[1]))
-##
-##    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-##    box = cv2.boundingRect(np.array(area_landmarks))
-##    x, y, w, h = box
-##
-##    x2 = x + w + 20
-##    x = x - 10 
-##    y2 = y + h + 20
-##    y = y - 10 
-##
-##
-##    crop = th2[y:y2, x:x2]
-##    crop = make_line(crop)
-##
-##    crop_color = frame_head[y:y2, x:x2]
-##    crop_color = skin_detector(crop_color)
-##
-##
-##
-##    h, w = crop.shape[:2]
-##
-##
-##    contours, _ = cv2.findContours(crop, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-##
-##    for c in contours:
-##
-##
-##        print((cv2.contourArea(c) * 100) / (h * w))
-##
-##        cv2.drawContours(crop_color, [c], -1, (0, 255, 0), 1)
-##        crop_color_resize = cv2.resize(crop_color, (w * 4, h * 4))
-##        crop_resize = cv2.resize(crop, (w * 4, h * 4))
-##
-##
-##        cv2.imshow("crop_color_resize", crop_color_resize)
-##        cv2.imshow("crop_resize", crop_resize)
-##        cv2.waitKey(0)
-
-
-
-
-
-
-
-
-
-
-    
-    area_landmarks1 = (landmarks_head.part(36).x - int((20 * 100) / landmarks_head.part(36).x),
-                        landmarks_head.part(36).y + int((2 * 100) / landmarks_head.part(36).y))
-
-    area_landmarks2 = (landmarks_head.part(39).x + int((20 * 100) / landmarks_head.part(45).x),
-                        landmarks_head.part(39).y+ int((2 * 100) / landmarks_head.part(39).y))
-
-    area_landmarks3 = (area_landmarks1[0],
-                       area_landmarks1[1] + int((15 * 100) / area_landmarks1[1]))
-
-    area_landmarks4 = (area_landmarks2[0],
-                       area_landmarks2[1] + int((15 * 100) / area_landmarks2[1]))
-
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-    #cv2.rectangle(frame_head, (x, y), (x+w, y+h), (0, 0, 255), 1)
-
-
-
-def oeil_dessous_2(landmarks_head, frame_head):
-
-    area_landmarks1 = (landmarks_head.part(42).x - int((20 * 100) / landmarks_head.part(42).x),
-                        landmarks_head.part(42).y + int((2 * 100) / landmarks_head.part(42).y))
-
-    area_landmarks2 = (landmarks_head.part(45).x + int((20 * 100) / landmarks_head.part(45).x),
-                        landmarks_head.part(45).y+ int((2 * 100) / landmarks_head.part(45).y))
-
-    area_landmarks3 = (area_landmarks1[0],
-                       area_landmarks1[1] + int((15 * 100) / area_landmarks1[1]))
-
-    area_landmarks4 = (area_landmarks2[0],
-                       area_landmarks2[1] + int((15 * 100) / area_landmarks2[1]))
-
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-    #cv2.rectangle(frame_head, (x, y), (x+w, y+h), (0, 0, 255), 1)
-
-
-
-def amertume1(frame_head, landmarks_head, th2):
-
-    area_landmarks1 = (landmarks_head.part(31).x - int((15 * 100) / landmarks_head.part(31).x),
-                        landmarks_head.part(31).y - int((0.5 * 100) / landmarks_head.part(31).y))
-
-    area_landmarks2 = (landmarks_head.part(48).x  - int((15 * 100) / landmarks_head.part(48).x),
-                        landmarks_head.part(48).y + int((0.5 * 100) / landmarks_head.part(48).x))
-
-    area_landmarks3 = (area_landmarks1[0]- int((45 * 100) / area_landmarks1[0]),
-                       area_landmarks1[1]- int((15 * 100) / area_landmarks1[1]))
-
-    area_landmarks4 = (area_landmarks2[0] - int((45 * 100) / area_landmarks2[0]),
-                       area_landmarks2[1] + int((15 * 100) / area_landmarks2[1]))
-
-    area_landmarks = [area_landmarks1, area_landmarks2, area_landmarks3, area_landmarks4]
-
-    box = cv2.boundingRect(np.array(area_landmarks))
-    x, y, w, h = box
-    x2 = x + w + 10
-    x = x + 10
-    y2 = y + h + 20
-    y = y + 40
-
-    crop = th2[y:y2, x:x2]
-    crop_color = frame_head[y:y2, x:x2]
-    crop_color = skin_detector(crop_color)
-
-    crop = make_line(crop)
-    #cv2.imshow("crop", crop)
-
-
-    #cv2.rectangle(frame_head, (x, y), (x+w, y+h), (0, 0, 255), 1)
-
-
-
-
-
-
+#------- PROG --------
 
 while True:
 
@@ -814,143 +500,38 @@ while True:
     frame_head, gray_head = resize_eyes(frame, face_division)
 
 
-    landmarks_head, head_box_head = head_points(gray_head, predictor, detector)
- 
-    areas =  { "cheek2":[54, 13, 15, 28],"beet_eyes" :[20, 23, 42, 39],
-               "cheek1": [48, 3, 1, 28]}
-
-
-    th2 = cv2.adaptiveThreshold(gray_head,255,cv2.ADAPTIVE_THRESH_MEAN_C,\
-                                cv2.THRESH_BINARY,9,2)
-    
-
-    if landmarks_head is not None:
-##
-##        a = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [48, 59, 52, 54, 57]]
-##        a = cv2.convexHull(np.array(a))
-##        a = cv2.boundingRect(a)
-##        x, y, w, h = a
-##
-##        for i in range(x, x+w):
-##            for j in range(y, y+h):
-##                th2[j, i] = 255
-##            
-##        a = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [17, 18, 19, 20, 21]]
-##        a = cv2.convexHull(np.array(a))
-##        a = cv2.boundingRect(a)
-##        x, y, w, h = a
-##
-##        for i in range(x, x+w):
-##            for j in range(y, y+h):
-##                th2[j, i] = 255
-##
-##
-##        a = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [22, 23, 24, 25, 26]]
-##        a = cv2.convexHull(np.array(a))
-##        a = cv2.boundingRect(a)
-##        x, y, w, h = a
-##
-##        for i in range(x, x+w):
-##            for j in range(y, y+h):
-##                th2[j, i] = 255
-##
-##
-        a = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [36, 37, 38, 39, 40, 41]]
-        a = cv2.convexHull(np.array(a))
-        a = cv2.boundingRect(a)
-        x, y, w, h = a
-
-        for i in range(x - 5, x+w + 5):
-            for j in range(y - 5, y+h+5):
-                th2[j, i] = 255
-
-
-        a = [(landmarks_head.part(n).x, landmarks_head.part(n).y) for n in [42, 43, 44, 45, 46, 47]]
-        a = cv2.convexHull(np.array(a))
-        a = cv2.boundingRect(a)
-        x, y, w, h = a
-##
-##        for i in range(x - 5, x+w + 5):
-##            for j in range(y - 5, y+h+5):
-##                th2[j, i] = 255
-
-
-
-
-
+    #THREAD
+    landmarks68 = [0, 17, 16, 8]
+    landmarks81 = [68, 72, 16, 10, 6, 77]
+    landmarks_head, head_box_head = head_points(gray_head, predictor, detector, landmarks68)
+    landmarks_head1, head_box_head1 = head_points(gray_head, predictor1, detector1, landmarks81)
 
 
 
     if landmarks_head is not None:
-        liste = [17, 26]
 
-        def un(frame_head, liste, th2, landmarks_head):
-            front(frame_head, liste, th2, landmarks_head)
-        def deux(frame_head, landmarks_head, th2):
-            bouche_cote_1(frame_head, landmarks_head, th2)
+        #Make an adaptative threhsold
+        mode = cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+        threshold = cv2.adaptiveThreshold(gray_head, 255, mode, cv2.THRESH_BINARY,11, 2)
 
-        def trois(frame_head, landmarks_head, th2):
-            bouche_cote_2(frame_head, landmarks_head, th2)
+        #Recuperate only skin color (raise hair)
+        frame_skin = skin_detector(frame_head)
+        frame_blur = cv2.GaussianBlur(frame_head, (5 ,5), 0)
 
-        def quattre(frame_head, landmarks_head, gray_head):
-            entre_oeil(landmarks_head, frame_head, gray_head)
-
- 
-        def cinq(frame_head, landmarks_head, th2):
-            cote_oeil_1(landmarks_head, frame_head, th2)
+        raising_part(landmarks_head, [17, 18, 19, 20, 21], threshold, head_box_head)
+        raising_part(landmarks_head, [22, 23, 24, 25, 26], threshold, head_box_head)
 
 
-        def six(frame_head, landmarks_head):
-            cote_oeil_2(landmarks_head, frame_head)
-        def sept(frame_head, landmarks_head):
-            oeil_dessous_1(landmarks_head, frame_head)
-        def huit(frame_head, landmarks_head):
-            oeil_dessous_2(landmarks_head, frame_head)
-
-        def neuf(frame_head, landmarks_head, th2):
-            amertume1(frame_head, landmarks_head, th2)
-
-        t1 = threading.Thread(target=un(frame_head, liste, th2, landmarks_head))
-        t2 = threading.Thread(target=deux(frame_head, landmarks_head, th2))
-        t3 = threading.Thread(target=trois(frame_head, landmarks_head, th2))
-        t4 = threading.Thread(target=quattre(frame_head, landmarks_head, th2))
-        t5 = threading.Thread(target=cinq(frame_head, landmarks_head, th2))
-        t6 = threading.Thread(target=six(frame_head, landmarks_head))
-        t7 = threading.Thread(target=sept(frame_head, landmarks_head))
-        t8 = threading.Thread(target=huit(frame_head, landmarks_head))
-        t9 = threading.Thread(target=neuf(frame_head, landmarks_head, th2))
-
+        t1 = threading.Thread(target=un(frame_head, landmarks_head,landmarks_head1, gray_head,
+                                        threshold, frame_skin, frame_blur, head_box_head1))
 
         t1.start()
-        t2.start()
-        t3.start()
-        t4.start()
-        t5.start()
-        t6.start()
-        t7.start()
-        t8.start()
-        t9.start()
-
-
         t1.join()
-        t2.join()
-        t3.join()
-        t4.join()
-        t5.join()
-        t6.join()
-        t7.join()
-        t8.join()
-        t9.join()
-
-        #récuperer les rides mtn !
-
 
 
 
     cv2.imshow("frame_head", frame_head)
-    #cv2.imshow("th2", th2)
-    
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(0) & 0xFF == ord('q'):
         break
 
 
