@@ -18,9 +18,19 @@ from dlib_points.points_of_face import head_points
 from scipy.spatial import distance as dist
 
 
-from tete.bent_up_head import bent_up_head
-from tete.leanning_head import leanning_head
-from tete.turn_head import turn_head
+
+
+
+from figure.wrinkle.forehead import front
+from figure.wrinkle.side_mouth import side_one
+from figure.wrinkle.beetween_eyes import wrinkle_lion
+from figure.wrinkle.crow_feet import crow_feet
+from figure.wrinkle.under_eyes import under_eyes
+
+from figure.wrinkle.ride_utils import recuperate_coordinates
+from figure.wrinkle.ride_utils import masks_from_convex
+from figure.wrinkle.ride_utils import masks_from_box
+from figure.wrinkle.ride_utils import identification_wrinkle
 
 
 predictor = ""
@@ -57,28 +67,25 @@ t2.join()
 
 from video_capture_utils.video_capture_utils import resize_face, resize_eyes
 
-video = video_path.format("aa.mp4")
+video = video_path.format("e.mp4")
 cap = cv2.VideoCapture(video)
 
 
 #face_division = search_video_size(video, predictor, detector, dlib_model, 93)
 face_division = 2.899999999999998
+face_division = 1.650000000000001
 
 
 
 
+def extremums(c):
 
-def make_line(thresh):
-    """We make line for detect more than one area
-    with border, on eyelashes is paste to the border"""
+    xe = tuple(c[c[:, :, 0].argmin()][0])  #left
+    ye = tuple(c[c[:, :, 1].argmin()][0])  #right
+    we = tuple(c[c[:, :, 0].argmax()][0])
+    he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
 
-    cv2.line(thresh, (0, 0), (0, thresh.shape[0]), (255, 255, 255), 2)
-    cv2.line(thresh, (0, 0), (thresh.shape[1], 0), (255, 255, 255), 2)
-    cv2.line(thresh, (thresh.shape[1], 0), (thresh.shape[1], thresh.shape[0]), (255, 255, 255), 2)
-    cv2.line(thresh, (0,  thresh.shape[0]), (thresh.shape[1], thresh.shape[0]), (255, 255, 255), 2)
-
-    return thresh
-
+    return xe, ye, we, he
 
 def skin_detector(frame):
 
@@ -98,338 +105,9 @@ def skin_detector(frame):
 
 
 
-def extremums(c):
 
-    xe = tuple(c[c[:, :, 0].argmin()][0])  #left
-    ye = tuple(c[c[:, :, 1].argmin()][0])  #right
-    we = tuple(c[c[:, :, 0].argmax()][0])
-    he = tuple(c[c[:, :, 1].argmax()][0])  #bottom
-
-    return xe, ye, we, he
-
-
-def recuperate_coordinate(crop_color_skin, extremums):
-    """Recuperate from extremums contours the color
-    from the picture"""
-
-    xe, ye, we, he = extremums
-
-    right = crop_color_skin[xe[1], xe[0]] #right coord
-    left  = crop_color_skin[ye[1], ye[0]] #left coord
-
-    left_bot = crop_color_skin[ye[1], xe[0]] #left bot coord
-    left_top = crop_color_skin[he[1], xe[0]] #left top coord
-
-    right_bot = crop_color_skin[ye[1], we[0]] #right bot coord
-    right_top = crop_color_skin[he[1], we[0]] #right top coord
-
-    top_right = crop_color_skin[ye[1], xe[0]] #right bot coord
-    top_left  = crop_color_skin[ye[1], we[0]] #right top coord
-
-    bot_right = crop_color_skin[he[1], xe[0]] #right bot coord
-    bot_left  = crop_color_skin[he[1], we[0]] #right top coord
-
-    return (right, left, left_bot, left_top, right_bot, right_top,
-            top_right, top_left, bot_right, bot_left)
-
-
-def no_skin_color(c, crop_color_skin):
-
-    xe, ye, we, he = extremums(c)
-
-    #Recuperate extremums contours colors from the skin picture.
-    coordinates = recuperate_coordinate(crop_color_skin, (xe, ye, we, he))
-    right, left, left_bot, left_top, right_bot, right_top,\
-            top_right, top_left, bot_right, bot_left = coordinates
-
-    black = False
-    #If extremums left and right touch black pixel (255, 255, 255)
-    #isn't skin pixels.
-    #Verify if sides touch black pixels. (no skin pixels)
-    verification = lambda i: True if i[0] == 0 and i[1] == 0 and i[2] == 0 else False
-
-    #right left extremums.
-    contour_touch_black1 = [verification(i) for i in [right, left]]
-    contour_touch_black2 = [verification(i) for i in [left_bot, left_top]]
-    contour_touch_black3 = [verification(i) for i in [right_bot, right_top]]
-    contour_touch_black4 = [verification(i) for i in [top_right, top_left]]
-    contour_touch_black5 = [verification(i) for i in [bot_right, bot_left]]
-
-    #Break and return True if the 2 px touchs black pixel.
-    for i in [contour_touch_black1, contour_touch_black2, contour_touch_black3,
-              contour_touch_black4, contour_touch_black5]:
-        if i.count(True) == 2:
-            black = True
-            break
-
-    return black, (xe, ye, we, he)
-
-
-
-def recuperate_forehead_area(landmarks_head1, head_box_head1):
-    """We recuperate landmarks from 81 points dlib (forehead region)"""
-
-    #17 - 26 = on eyes
-    #69 - 80 = forehead https://github.com/codeniko/shape_predictor_81_face_landmarks
-    landmarks_forehead = [75, 76, 68, 69, 70, 71, 80, 72, 73, 79, 74]
-    landmarks_on_eyes  = [26, 25, 24, 23, 22, 21, 20, 19, 18, 17]
-
-    #Recuperate coordinates
-    landmarks_forehead = [(landmarks_head1.part(n).x, landmarks_head1.part(n).y) for n in landmarks_forehead]
-
-    _, _, _, h = head_box_head1
-    landmarks_on_eyes  = [(landmarks_head1.part(n).x, landmarks_head1.part(n).y - int( (5 * h) / 100))
-                          for n in landmarks_on_eyes]
-
-    landmarks_on_eyes += landmarks_forehead
-
-
-    #Recuperate points into a matrice
-    landmarks_on_eyes = np.array(landmarks_on_eyes)
-
-    return landmarks_on_eyes
-
-
-def recuperate_forehead_mask(points, gray, height_frame, width_frame,
-                             threshold, frame_skin, frame, blur_frame):
-    """Here we recuperate the region from the picture"""
-
-    black_frame = np.zeros((height_frame, width_frame), np.uint8)
-    mask = np.full((height_frame, width_frame), 255, np.uint8)
-    cv2.fillPoly(mask, [points], (0, 0, 255))
-
-    #Skin mask (raise hair)
-    gray_skin = cv2.cvtColor(frame_skin, cv2.COLOR_BGR2GRAY)
-    mask_skin = cv2.bitwise_not(black_frame, gray_skin.copy(), mask=mask)
-
-    #Threshold mask for wrinkles
-    mask_threhsold = cv2.bitwise_not(black_frame, threshold.copy(), mask=mask) 
-
-    #Recuperate region interest.
-    box = cv2.boundingRect(points)
-    x ,y, w, h = box
-
-    crop_skin      = frame_skin[y:y+h, x:x+w]
-
-    crop_threhsold = mask_threhsold[y:y+h, x:x+w]
-    crop_threhsold = make_line(crop_threhsold)
-
-    crop_frame     = frame[y:y+h, x:x+w]
-    crop_blur      = blur_frame[y:y+h, x:x+w]
-
-    #Put white pixel into none skin pixel (hair) on threshold
-    for j in range(crop_skin.shape[1]):
-        for i in range(crop_skin.shape[0]):
-            if crop_skin[i, j][0] == 0 and\
-               crop_skin[i, j][1] == 0 and\
-               crop_skin[i, j][2] == 0:
-                crop_threhsold[i, j] = 255
-
-    return (crop_skin, crop_threhsold, crop_frame, crop_blur)
-
-
-def hair_color(crop_blur, contour): #a verifier
-    """Recuperate color of a contour different of a skin color, who could be hair"""
-
-    #Hair color.
-    noir = 0; marron = 0; blond = 0; no = 0; out = ""
-
-    #Dimension of the crop.
-    height, width = crop_blur.shape[:2]
-
-    #Recuperate color of the contour.
-    couleur_hair = [crop_blur[j, i] for j in range(height) for i in range(width)]
-
-    #Condition of color pixels.
-    for nb, couleur in enumerate(couleur_hair):
-
-        if couleur[1] + 10 < couleur[0] > couleur[2] + 10 and 50 < couleur[1] < 130:
-            marron += 1
-
-        elif couleur[0] < 50 and couleur[1] < 50 and couleur[2] < 50:
-            noir += 1
-
-        elif couleur[0] > 90 and couleur[1] > 90 and couleur[2] > 90 and\
-           couleur[0] >= couleur[1] + 10 and couleur[1] >= couleur[2] + 10:
-            blond += 1
-
-    #Sort our dictionnary and recuperate the highter number.
-    dico_color = {"noir":noir, "marron":marron, "blond":blond, "no":no}
-    dico_color = sorted(dico_color.items(), key=lambda t: t[1])
-
-    #If we have more 50 % of black.
-    if (dico_color[-1][1] * nb) / 100 > 50:
-        out = dico_color[-1][0]
-
-    return out
-
-
-
-def frange_side(extrems, head_box_head1):
-    """frange side = hair parting side"""
-
-    #width of the head box
-    _, _, width_head, _ = head_box_head1
-    #Extremums of the contours.
-    xe, ye, we, he = extrems
-
-    #Middle of the face.
-    mid_face = int(width_head / 2)
-    #We want a wick hair (with a length).
-    length_contour = int(we[0] - xe[0]) > width_head * 0.4 #30 de 77
-
-    situation_meche = ""
-    #Search the higther side (left or right).
-    if ye[0] > mid_face:  situation_meche = "meche droite donc raie gauche"
-    else:                 situation_meche = "meche gauche donc raie droite"
-
-    return situation_meche
-
-
-
-LOCALISATION_WRINKLE = [] #(Coordinate, pente angulaire, dimensions, scale)
-
-def wrinkle_draw(cnt, mask_frame, area_forehead):
-
-    #(Coordinate, pente angulaire, dimensions, scale)
-    global LOCALISATION_WRINKLE
-
-    #print(height * width, cv2.contourArea(cnt))
-
-    #Recuperate extremums points of the contour.
-    xe, ye, we, he = extremums(cnt)
-
-    #Recuperate dimensions of the contour.
-    largeur  = we[0] - xe[0]
-    longueur = he[1] - ye[1]
-
-    #Recuperate the dominant form of the wrinkle
-    if largeur > longueur:
-        m = (we[1] - xe[1]) / (we[0] - xe[0])
-        cv2.line(mask_frame, we, xe, (0, 0, 255), 1)
-        largeur = True
-
-    elif longueur > largeur:
-        m = (he[1] - ye[1]) / (he[0] - ye[0])
-        cv2.line(mask_frame, he, ye, (0, 0, 255), 1)
-        longueur = True
-
-    #Verify if the wrinkle location's stocked
-    new_wrinkle = localisation(area_forehead)
-
-    #Wrinkle is not int stock.
-    if new_wrinkle is True:
-
-        if largeur is True:
-            #(Coordinate, pente angulaire, dimensions, scale)
-            LOCALISATION_WRINKLE.append((we, xe, m, we[0] - xe[0], area_forehead))
-
-        elif longueur is True:
-            #(Coordinate, pente angulaire, dimensions, scale)
-            LOCALISATION_WRINKLE.append((he, ye, m, he[1] - ye[1], area_forehead))
-
-
-def localisation(area_forehead, dimension):
-
-    #(Coordinate, pente angulaire, dimensions, scale)
-    global LOCALISATION_WRINKLE
-
-    new_wrinkle = False
-    for i in LOCALISATION_WRINKLE:
-        print(i)
-
-    new_wrinkle = True
-    return new_wrinkle
-
-
-
-
-
-
-
-
-def identification_wrinkles(frame, mask_skin, mask_threhsold,
-                            mask_frame, mask_blur, head_box_head1,
-                            landrmarks_forehead):
-    """Recuperate contours of the thresold crop, and treat them for know
-    if we have wick or wrinkles of the forehead"""
-
-    #Count area region of the forehead
-    area_forehead = cv2.contourArea(landrmarks_forehead)
-    space_forehead = 0
-
-    height, width = mask_threhsold.shape[:2]
-    contours, _ = cv2.findContours(mask_threhsold, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-
-
-    for cnt in contours:
-
-        #Conditions for keep the contour. (max and min length).
-        max_contour = cv2.contourArea(cnt) < (height * width) * 0.9 #5220 de 5800
-        min_contour = cv2.contourArea(cnt) > int( (height * width) * 0.0039 ) #16 de 4140
-
-
-        if max_contour is True and min_contour is True:
-
-            #Not a skin color
-            black, extrems = no_skin_color(cnt, mask_skin)
-            if black is True:
-                color = hair_color(mask_blur, cnt)
-
-                #Could be hair, verify colors
-                if color is not None:
-                    situation_meche = frange_side(extrems, head_box_head1)
-                    if situation_meche is not "":
-                        cv2.drawContours(mask_frame, [cnt], -1, (255, 0, 0), 1)
-                        cv2.imshow("frame_head", frame_head)
-                        cv2.waitKey(0)
-
-
-            #Skin color
-            elif black is False:
-
-                space_forehead += cv2.contourArea(cnt)
-
-                wrinkle_draw(cnt, mask_frame, area_forehead)
-
-
-                #cv2.drawContours(mask_frame, [cnt], -1, (0, 255, 0), 1)
-                cv2.imshow("frame_head", frame_head)
-                cv2.waitKey(0)
-
-
-    #cv2.imshow("mask_threhsold", mask_threhsold)
-    #cv2.imshow("mask_skin", mask_skin)
-
-
-
-
-
-
-def front(frame_head, landmarks_head, landmarks_head1, gray,
-          threshold, frame_skin, frame_blur, head_box_head1):
-
-    #Recuperate forehead region from dlib model.
-    landrmarks_forehead = recuperate_forehead_area(landmarks_head1, head_box_head1)
-    #cv2.drawContours(frame_head, [landrmarks_forehead], -1, (0, 0, 255), 1)
-
-    #Recuperate dimensions of the picture.
-    height_frame, width_frame = frame_head.shape[:2]
-
-    #Recuperate mask interest of the picture.
-    masks = recuperate_forehead_mask(landrmarks_forehead, gray, height_frame,
-                                     width_frame, threshold, frame_skin, frame_head, frame_blur)
-
-    mask_skin, mask_threhsold, crop_frame, crop_blur = masks
-    #cv2.imshow("mask_threhsold", mask_threhsold)
-    #cv2.imshow("mask_skin", mask_skin)
-
-
-    identification_wrinkles(frame_head, mask_skin, mask_threhsold,
-                            crop_frame, crop_blur, head_box_head1,
-                            landrmarks_forehead)
-
-
+def under_side_mouse(frame_head, landmarks_head, gray, threshold, head_box_head):
+    pass
 
 
 
@@ -438,20 +116,23 @@ def front(frame_head, landmarks_head, landmarks_head1, gray,
 
 #------- Raise anatomy --------
 
-def raising_part(landmarks_head, points_list, picture, head_box_head):
+def raising_part(landmarks_head, points_list, picture, head_box_head, adding_height, add_width):
     """Put white on region interest on a gray picture"""
 
     #Add height px of our y points.
-    height = head_box_head[3]
-    add_height_to_points = int(height * 0.055) # 5 91
-
+    width, height = head_box_head[2:]
+    add_height_to_points = int(height * adding_height)
+    add_width_to_points = int(height * add_width)
+    
     #Recuperate landmarks 1:-1
     region = [(landmarks_head.part(n).x, landmarks_head.part(n).y - add_height_to_points)
               for n in points_list[1: -1]]
 
     #First and last landmark (for hide on eyes)
-    region1 = [(landmarks_head.part(points_list[0]).x, landmarks_head.part(points_list[0]).y)]
-    region2 = [(landmarks_head.part(points_list[-1]).x, landmarks_head.part(points_list[-1]).y)]
+    region1 = [(landmarks_head.part(points_list[0]).x + add_width_to_points,
+                landmarks_head.part(points_list[0]).y)]
+    region2 = [(landmarks_head.part(points_list[-1]).x + add_width_to_points,
+                landmarks_head.part(points_list[-1]).y)]
 
     #Make one list
     region1 += region
@@ -475,23 +156,89 @@ def raising_part(landmarks_head, points_list, picture, head_box_head):
 
 
 
+#------- Raise -----------
+
+def raising_anatomy(landmarks_head, threshold, head_box_head, liste, adding_height, add_width):
+    raising_part(landmarks_head, liste, threshold, head_box_head, adding_height, add_width)
+
+
+#------- Filters -----------
+threshold = ""
+threshold1 = ""
+def threshold_filter(gray_head):
+
+    global threshold
+    global threshold1
+    #Make an adaptative threhsold
+    mode = cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+    threshold = cv2.adaptiveThreshold(gray_head, 255, mode, cv2.THRESH_BINARY,11, 2)
+    threshold1 = cv2.adaptiveThreshold(gray_head, 255, cv2.ADAPTIVE_THRESH_MEAN_C,\
+                cv2.THRESH_BINARY,3,5)
+
+
+frame_skin = ""
+frame_blur = ""
+def skin_blur(frame_head):
+
+    global frame_skin
+    global frame_blur
+    #Recuperate only skin color (raise hair)
+    frame_skin = skin_detector(frame_head)
+    frame_blur = cv2.GaussianBlur(frame_head, (5 ,5), 0)
+
+
+
+#------- Landmarks -----------
+
+landmarks_head = ""
+head_box_head  = ""
+#Find landmarks from models.
+def landmarks62(gray_head, predictor, detector):
+
+    global landmarks_head
+    global head_box_head
+    landmarks68 = [0, 17, 16, 8]
+    landmarks_head, head_box_head = head_points(gray_head, predictor, detector, landmarks68)
+
+
+
+landmarks_head1 = ""
+head_box_head1  = "" 
+def landmarks81(gray_head, predictor1, detector1):
+
+    global landmarks_head1
+    global head_box_head1
+    landmarks81 = [68, 72, 16, 10, 6, 77]
+    landmarks_head1, head_box_head1 = head_points(gray_head, predictor1, detector1, landmarks81)
 
 
 
 
-#------- Thread --------
+#------- Wrinkles --------
 
-def un(frame_head, landmarks_head, landmarks_head1, gray,
+def forehead(frame_head, landmarks_head, landmarks_head1, gray,
        threshold, frame_skin, frame_blur, head_box_head1):
 
     front(frame_head, landmarks_head, landmarks_head1,
           gray, threshold, frame_skin, frame_blur, head_box_head1)
 
+def side_mouse(frame_head, landmarks_head, gray, threshold, head_box_head, nb_list):
+    side_one(frame_head, landmarks_head, gray, threshold, head_box_head, nb_list)
+
+def beetween_eyes(frame_head, landmarks_head, gray, threshold, head_box_head):
+    wrinkle_lion(frame_head, landmarks_head, gray, threshold, head_box_head)
+
+def eyes(frame_head, landmarks_head, gray, threshold1, head_box_head):
+    crow_feet(frame_head, landmarks_head, gray, threshold1, head_box_head)
+
+def cerne(frame_head, landmarks_head, gray, threshold, head_box_head, list_land, mode):
+    under_eyes(frame_head, landmarks_head, gray, threshold, head_box_head, list_land, mode)
+
+def amertume(frame_head, landmarks_head, gray, threshold, head_box_head):
+    under_side_mouse(frame_head, landmarks_head, gray, threshold, head_box_head)
 
 
 
-
-#------- PROG --------
 
 while True:
 
@@ -499,34 +246,286 @@ while True:
 
     frame_head, gray_head = resize_eyes(frame, face_division)
 
+    #---------Landmarks------------
+    thread_landmarks1 = threading.Thread(target=landmarks62(gray_head, predictor, detector))
+    thread_landmarks2 = threading.Thread(target=landmarks81(gray_head, predictor1, detector1))
 
-    #THREAD
-    landmarks68 = [0, 17, 16, 8]
-    landmarks81 = [68, 72, 16, 10, 6, 77]
-    landmarks_head, head_box_head = head_points(gray_head, predictor, detector, landmarks68)
-    landmarks_head1, head_box_head1 = head_points(gray_head, predictor1, detector1, landmarks81)
+    thread_landmarks1.start()
+    thread_landmarks2.start()
+
+    thread_landmarks1.join()
+    thread_landmarks2.join()
 
 
 
     if landmarks_head is not None:
 
-        #Make an adaptative threhsold
-        mode = cv2.ADAPTIVE_THRESH_GAUSSIAN_C
-        threshold = cv2.adaptiveThreshold(gray_head, 255, mode, cv2.THRESH_BINARY,11, 2)
+        #----------Filters------------
+        filter1 = threading.Thread(target=threshold_filter(gray_head))
+        filter2 = threading.Thread(target=skin_blur(frame_head))
 
-        #Recuperate only skin color (raise hair)
-        frame_skin = skin_detector(frame_head)
-        frame_blur = cv2.GaussianBlur(frame_head, (5 ,5), 0)
+        filter1.start()
+        filter2.start()
 
-        raising_part(landmarks_head, [17, 18, 19, 20, 21], threshold, head_box_head)
-        raising_part(landmarks_head, [22, 23, 24, 25, 26], threshold, head_box_head)
+        filter1.join()
+        filter2.join()
 
 
-        t1 = threading.Thread(target=un(frame_head, landmarks_head,landmarks_head1, gray_head,
-                                        threshold, frame_skin, frame_blur, head_box_head1))
+        #----------Raising part------------
+        #ESSAYER AVEC UNE FONCTION ET A LINTERIEUR DELLE MEME FAIRE DES THREAD ET PAS COMME CA
+        
+        raising_on_eyes1 = threading.Thread(target=raising_anatomy(landmarks_head, threshold,
+                                                               head_box_head, [17, 18, 19, 20, 21],
+                                                                0.055, 0))# 5 91
 
-        t1.start()
-        t1.join()
+        raising_on_eyes2 = threading.Thread(target=raising_anatomy(landmarks_head, threshold,
+                                                               head_box_head, [22, 23, 24, 25, 26],
+                                                                0.055, 0))
+
+        raising_mouse = threading.Thread(target=raising_anatomy(landmarks_head, threshold, head_box_head,
+                                                                [31, 48, 57, 54, 35],
+                                                                0, 0))
+
+        raising_eye1 = threading.Thread(target=raising_anatomy(landmarks_head, threshold1, head_box_head,
+                                                                [36, 37, 38, 39, 40, 41],
+                                                                0, 0))
+   
+        raising_eye2 = threading.Thread(target=raising_anatomy(landmarks_head, threshold1, head_box_head,
+                                                                [42, 43, 44, 45, 46, 47],
+                                                                0, -0.5))
+
+        raising_nose = threading.Thread(target=raising_anatomy(landmarks_head, threshold, head_box_head,
+                                                                [31, 32, 33, 34, 35, 28],
+                                                                0, 0.5))
+
+        raising_eye3 = threading.Thread(target=raising_anatomy(landmarks_head, threshold, head_box_head,
+                                                                [36, 37, 38, 39, 40, 41],
+                                                                0, 0))
+   
+        raising_eye4 = threading.Thread(target=raising_anatomy(landmarks_head, threshold, head_box_head,
+                                                                [42, 43, 44, 45, 46, 47],
+                                                                0, -0.5))
+
+        raising_on_eyes1.start()
+        raising_on_eyes2.start()
+        raising_mouse.start()
+        raising_eye1.start()
+        raising_eye2.start()
+        raising_nose.start()
+
+
+        raising_on_eyes1.join()
+        raising_on_eyes2.join()
+        raising_mouse.join()
+        raising_eye1.join()
+        raising_eye2.join()
+        raising_nose.join()
+
+
+
+        #----------Search wrinkles------------
+        #Forehead
+##        t1 = threading.Thread(target=forehead(frame_head, landmarks_head,landmarks_head1, gray_head,
+##                                              threshold, frame_skin, frame_blur, head_box_head1))
+##
+##        #Side mouth
+##        add1 = int(head_box_head[2] * 0.12) # 10 de 87 x1
+##        add2 = int(head_box_head[2] * 0.12) # 10 de 87 y1
+##
+##        add3 = int(head_box_head[2] * 0.18) # 15 de 87 x2
+##        add4 = int(head_box_head[2] * 0.18) # 15 de 87 x3
+##
+##        t2 = threading.Thread(target=side_mouse(frame_head, landmarks_head, gray_head,
+##                                                threshold, head_box_head,
+##                                                [30, 14, 12, add1, add2, -add3, -add4]))
+##
+##        t3 = threading.Thread(target=side_mouse(frame_head, landmarks_head, gray_head,
+##                                                threshold, head_box_head,
+##                                                [30, 2, 4, -add1, add2, add3, add4]))
+##
+##        t4 = threading.Thread(target=beetween_eyes(frame_head, landmarks_head,
+##                                                  gray_head, threshold, head_box_head))
+##
+##        t5 = threading.Thread(target=crow_feet(frame_head, landmarks_head,
+##                                               gray_head, threshold1, head_box_head,
+##                                               [36, 17, 37, 0, 36, 31]))
+##
+##        t6 = threading.Thread(target=crow_feet(frame_head, landmarks_head,
+##                                               gray_head, threshold1, head_box_head,
+##                                               [45, 26, 44, 16, 45, 35]))
+## 
+##        t7 = threading.Thread(target=cerne(frame_head, landmarks_head,
+##                                           gray_head, threshold, head_box_head,
+##                                           [36, 36, 39, 39, 36, 36, 39, 39], "left"))
+## 
+##        t8 = threading.Thread(target=cerne(frame_head, landmarks_head,
+##                                           gray_head, threshold, head_box_head,
+##                                           [42, 42, 45, 45, 42, 42, 45, 45], "right"))
+##
+##        t9 = threading.Thread(target=amertume(frame_head, landmarks_head,
+##                                           gray_head, threshold, head_box_head))
+
+
+
+        """En faire des thread et supprimer la haut"""
+        def testing(landmarks, landmarks81, head_box_head,
+                    head_box_head1, frame_head, threshold, threshold1):
+
+            #Without and with forehead head dimensions.
+            _, _, width_head, height_head = head_box_head
+            _, _, _, height_head1 = head_box_head1
+
+##            #Beetween eyes.
+##            adding_height = int(height_head * 0.09)   #5 de 74
+##            adding_width  = int(width_head  * 0.015)  #1 de 90
+##
+##            adding = [(-adding_width, -adding_height),
+##                      (adding_width, -adding_height),
+##                      (0, -adding_height)]
+##
+##            points = [(21, 21), (22, 22), (27, 27)]
+##
+##
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_threhsold, crop_frame, box_crop = masks_from_box(convexPoints, threshold, frame)
+##
+##
+##
+##            #under eyes left.
+##            add_height = int(height_head * 0.1) #8 de 85
+##
+##            adding = [(0, add_height), (0, add_height),
+##                      (0, 2 * add_height), (0, 2 * add_height)]
+## 
+##            points = [(36, 36), (39, 39), (36, 36), (39, 39)]
+##
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_threhsold, crop_frame, box_crop = masks_from_box(convexPoints, threshold, frame)
+##
+##
+##
+##            #under eyes right.
+##            add_height = int(height_head * 0.1) #8 de 85
+##
+##            adding = [(0, add_height), (0, add_height),
+##                      (0, 2 * add_height), (0, 2 * add_height)]
+## 
+##            points = [(42, 42), (45, 45), (42, 42), (45, 45)]
+##
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_threhsold, crop_frame, box_crop = masks_from_box(convexPoints, threshold, frame)
+##
+##
+##
+##            #side mouth right.
+##            add1 = int(head_box_head[2] * 0.12) # 10 de 87 x1
+##            add2 = int(head_box_head[2] * 0.18) # 15 de 87 x2
+##
+##            adding = [(add1, 0), (-add2, 0), (-add2, 0)]
+##            points = [(30, 30), (14, 14), (12, 12)]
+##
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_frame, crop_threhsold, box_crop = masks_from_convex(convexPoints, threshold, frame)
+##
+##
+##
+##            #side mouth left.
+##            adding = [(-add1, 0), (add2, 0), (add2, 0)]
+##            points = [(30, 30), (2, 2), (4, 4)]
+##            maxContour = 0.8    #285 de 357
+##            minContour = 0.008  #3 de 465
+##            maxLength  = 0
+##            minLength  = 0.26   #10 de 39
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_frame, crop_threhsold, box_crop = masks_from_convex(convexPoints, threshold, frame)
+
+
+
+            #crow feet right.
+            adding = [(0, 0), (0, 0), (0, 0)]
+            points = [(36, 37), (17, 37), (36, 31), (0, 17)]
+            maxContour = 0.8    #285 de 357
+            minContour = 0.003  #1 de 465
+            maxLength  = 0
+            minLength  = 0.28   #10 de 37
+            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+            crop_threhsold, crop_frame, box_crop = masks_from_convex(convexPoints, threshold1, frame_head)
+            identification_wrinkle(crop_threhsold, crop_frame, box_crop, head_box_head,
+                                   maxContour, minContour, maxLength, minLength)
+
+  
+            #crow feet left.
+            adding = [(0, 0), (0, 0), (0, 0)]
+            points = [(45, 44), (26, 44), (45, 35), (16, 26)]
+            maxContour = 0.8    #285 de 357
+            minContour = 0.003  #1 de 465
+            maxLength  = 0
+            minLength  = 0.28   #10 de 37
+            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+            crop_threhsold, crop_frame, box_crop = masks_from_convex(convexPoints, threshold1, frame_head)
+            identification_wrinkle(crop_threhsold, crop_frame, box_crop, head_box_head,
+                                   maxContour, minContour, maxLength, minLength)
+
+
+
+
+##            #forehead
+##            add1 = - int( (5 * height_head1) / 100)
+##            adding = [(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0),
+##                      (0, 0), (0, 0), (0, 0), (0, 0), (0, 0),
+##                      (0, 0), (0, 0), (0, add1), (0, add1),
+##                      (0, add1), (0, add1), (0, add1), (0, add1),
+##                      (0, add1), (0, add1), (0, add1), (0, add1)]
+##
+##            points = [(75, 75), (76, 76), (68, 68), (69, 69),
+##                      (70, 70), (71, 71), (80, 80), (72, 72),
+##                      (73, 73), (79, 79), (74, 74), (26, 26),
+##                      (25, 25), (24, 24), (23, 23), (22, 22),
+##                      (21, 21), (20, 20), (19, 19), (18, 18),
+##                      (17, 17)]
+##
+##            convexPoints = recuperate_coordinates(points, adding, landmarks, frame_head, "middle")
+##            crop_frame, crop_threhsold, box_crop = masks_from_convex(convexPoints, threshold, frame)
+##
+
+
+
+
+
+
+
+
+
+
+
+
+
+        t10 = threading.Thread(target=testing(landmarks_head, landmarks_head1, head_box_head,
+                                              head_box_head1, frame_head, threshold, threshold1))
+
+##        t1.start()
+##        t2.start()
+##        t3.start()
+##        t4.start()
+##        t5.start()
+##        t6.start()
+##        t7.start()
+##        t8.start()
+##        t9.start()
+        t10.start()
+
+##        t1.join()
+##        t2.join()
+##        t3.join()
+##        t4.join()
+##        t5.join()
+##        t6.join()
+##        t7.join()
+##        t8.join()
+##        t9.join()
+        t10.join()
+
+
 
 
 
